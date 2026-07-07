@@ -1,0 +1,15 @@
+{
+  "name": "agent-db-plugin",
+  "owner": {
+    "name": "ollybaysion",
+    "email": "ollybaysion@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "agent-db-plugin",
+      "description": "Read-only Oracle MCP server plugin.",
+      "version": "0.1.0",
+      "source": "./"
+    }
+  ]
+}
