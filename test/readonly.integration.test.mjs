@@ -45,15 +45,14 @@ function delay(ms) {
 }
 
 // ORA-01466 ("table definition has changed") is a documented edge case (design
-// §11: querying a table whose definition changed <1s ago, under a read-only
-// txn) — rare, and worse under a loaded box running the whole suite
-// concurrently. The design's own documented mitigation is a single retry, not
-// production retry logic (that's a future trigger, not #4's scope) — so apply
-// it here, test-side only.
-async function runExpectingShapeStub(fn) {
+// §11: querying a table whose definition changed recently, under a read-only
+// txn) — how wide that window needs to be is load-dependent (observed needing
+// >1s on this long-running, repeatedly-hammered container). The design's own
+// mitigation is a retry, not a bigger fixed sleep — apply it here, test-side.
+async function execRetrying01466(fn) {
   const result = await fn();
   if (!result.ok && /ORA-01466/.test(result.error)) {
-    await delay(750);
+    await delay(2000);
     return fn();
   }
   return result;
@@ -119,23 +118,20 @@ test("executeReadOnly: a semicolon-chained statement is rejected by the driver, 
   assert.match(result.error, /ORA-03405/);
 });
 
-test("executeReadOnly: a valid SELECT reaches the (not-yet-implemented) shaping hook and still cleans up the connection", { skip }, async () => {
-  const result = await runExpectingShapeStub(() =>
+test("executeReadOnly: a valid SELECT succeeds end-to-end (via format.mjs, #5) and cleans up the connection", { skip }, async () => {
+  const result = await execRetrying01466(() =>
     executeReadOnly({
       alias: ALIAS,
       aliasConfig,
       sql: "SELECT note FROM t_readonly_it WHERE id = 1",
     }),
   );
-  // format.mjs's shapeResult is issue #5's job — until then this is the expected
-  // failure mode for an otherwise-successful query. What this test actually
-  // proves is that checkout/rollback/STRO/execute all ran without error and the
-  // connection was handed back to the pool cleanly (poolMin:0 → connectionsInUse:0).
-  assert.equal(result.ok, false);
-  assert.match(result.error, /NotImplemented: shapeResult/);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.rows, [["alpha"]]);
+  assert.equal(result.truncated, false);
 
   const pool = oracledb.getPool(ALIAS);
-  assert.equal(pool.connectionsInUse, 0);
+  assert.equal(pool.connectionsInUse, 0); // handed back to the pool cleanly
 });
 
 test("executeReadOnly: checkout-time rollback cleans up a dirty pooled connection before the next query (§12-3)", { skip }, async () => {
@@ -148,13 +144,14 @@ test("executeReadOnly: checkout-time rollback cleans up a dirty pooled connectio
   await dirty.execute("UPDATE t_readonly_it SET note = 'dirty' WHERE id = 1");
   await dirty.close(); // returned to the pool with an uncommitted txn still open
 
-  const result = await runExpectingShapeStub(() =>
+  const result = await execRetrying01466(() =>
     executeReadOnly({
       alias: ALIAS,
       aliasConfig,
       sql: "SELECT note FROM t_readonly_it WHERE id = 1",
     }),
   );
-  assert.equal(result.ok, false); // still hits the shapeResult stub, not ORA-01453
-  assert.match(result.error, /NotImplemented: shapeResult/);
+  assert.equal(result.ok, true); // not ORA-01453 — checkout-rollback cleared the dangling txn
+  // the dirty UPDATE was never committed, so the checkout-rollback discarded it
+  assert.deepEqual(result.rows, [["alpha"]]);
 });
