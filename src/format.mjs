@@ -56,8 +56,18 @@ function formatBytes(n) {
   return `${(n / 1024).toFixed(1)}KB`;
 }
 
+// Text truncation is measured in CHARACTERS, not bytes — both a CLOB's lob.length
+// and a JS string's .length are character counts. Labeling them KB/MB (formatBytes)
+// understates multibyte text (a 2,500-char Korean CLOB is ~7KB in UTF-8, not 2.4KB),
+// so the note reports a plain char count instead.
+function formatCount(n) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
 function truncationNote(totalChars) {
-  return `...[truncated, total ${formatBytes(totalChars)}]`;
+  return `...[truncated, total ${formatCount(totalChars)} chars]`;
 }
 
 async function closeLobQuietly(lob) {

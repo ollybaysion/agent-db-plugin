@@ -83,8 +83,12 @@ before(async () => {
          'hello'
        )`,
     );
-    // grow the CLOB well past the 2000-char cell cap (~256KB) without a giant literal
-    for (let i = 0; i < 4; i++) await setup.execute(`UPDATE t_format_it SET doc = doc || doc`);
+    // Grow the CLOB to ~8MB (32767 * 2^8) without a giant literal, so the cap test
+    // exercises the partial read against a genuinely large driver Lob end-to-end.
+    // (The "never materialize the whole thing" guarantee itself is asserted
+    // deterministically in format.test.mjs via a bounded-getData spy — see the note
+    // there on why an integration heap-delta check can't catch that regression.)
+    for (let i = 0; i < 8; i++) await setup.execute(`UPDATE t_format_it SET doc = doc || doc`);
     await setup.execute(`COMMIT`);
   } finally {
     await setup.close();
@@ -111,8 +115,7 @@ test("big NUMBER (> 2^53) round-trips losslessly as a string (§12-1)", { skip }
   assert.deepEqual(result.columns[0], { name: "BIG_NUM", type: "NUMBER" });
 });
 
-test("a large CLOB is capped to the cell size without materializing the whole thing (§12-2)", { skip }, async () => {
-  const startMem = process.memoryUsage().heapUsed;
+test("a large (~8MB) CLOB is capped to the cell size, read end-to-end through the real Lob (§12-2)", { skip }, async () => {
   const result = await execRetrying01466(() =>
     executeReadOnly({
       alias: ALIAS,
@@ -120,16 +123,17 @@ test("a large CLOB is capped to the cell size without materializing the whole th
       sql: "SELECT doc FROM t_format_it WHERE id = 1",
     }),
   );
-  const heapGrowthMB = (process.memoryUsage().heapUsed - startMem) / (1024 * 1024);
 
   assert.equal(result.ok, true);
   const cell = result.rows[0][0];
   assert.equal(cell.length <= CAPS.cell + 40, true); // capped text + a short truncation note
   assert.match(cell, /\[truncated, total/);
-  // the underlying CLOB is ~256KB+ (32767 * 2^4) — if it had been fetched whole
-  // via fetchAsString, heap growth would track that; a capped partial read should
-  // stay tiny by comparison.
-  assert.ok(heapGrowthMB < 5, `expected a small heap footprint, got ${heapGrowthMB.toFixed(2)}MB`);
+  // This exercises the partial read against a genuine multi-MB driver Lob, but it
+  // can only prove the OUTPUT is capped — a whole-materialize regression would also
+  // produce a capped output. The definitive "never materialize the whole LOB" guard
+  // is the bounded-getData assertion in format.test.mjs: a heap-delta check here
+  // can't catch it (the transient allocation is GC-eligible before heapUsed is next
+  // sampled, so it never registers — verified by regressing the code locally).
 });
 
 test("a BLOB never surfaces content, only a size placeholder", { skip }, async () => {

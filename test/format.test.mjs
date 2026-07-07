@@ -9,10 +9,17 @@ function metaCol(name, type) {
 // Fakes node-oracledb's Lob API just enough for shapeResult's cell logic:
 // getData(1-based offset, amount) and an async close(). `text` may be a
 // string (CLOB) — length/slicing work the same way for both in these tests.
-function fakeLob(text, closeCalls) {
+// `getDataCalls` records the (start, amount) of each read so a test can assert
+// the read was BOUNDED — this is the real §12-2 memory-bomb guard (an integration
+// heap-delta check can't catch it: a whole-materialize allocation is transient and
+// GC-eligible before heapUsed is next sampled, so it never shows up).
+function fakeLob(text, closeCalls, getDataCalls) {
   return {
     length: text.length,
-    getData: async (start, amount) => text.slice(start - 1, start - 1 + amount),
+    getData: async (start, amount) => {
+      getDataCalls?.push({ start, amount });
+      return text.slice(start - 1, start - 1 + amount);
+    },
     close: async () => {
       closeCalls?.push("close");
     },
@@ -118,12 +125,13 @@ test("shapeResult: null cells pass through as null regardless of column type", a
   assert.deepEqual(result.rows[0], [null, null]);
 });
 
-test("shapeResult: CLOB is partially read via getData(1, cap+1), truncated with a size note, and closed", async () => {
+test("shapeResult: CLOB is partially read via a BOUNDED getData(1, cap+1) — never whole (§12-2) — truncated with a note, and closed", async () => {
   const closeCalls = [];
-  const big = "c".repeat(CAPS.cell + 1000);
+  const getDataCalls = [];
+  const big = "c".repeat(CAPS.cell + 1_000_000); // a "huge" CLOB
   const result = await shapeResult({
     metaData: [metaCol("DOC", "CLOB")],
-    rows: [[fakeLob(big, closeCalls)]],
+    rows: [[fakeLob(big, closeCalls, getDataCalls)]],
     maxRows: 10,
     elapsedMs: 1,
   });
@@ -131,6 +139,10 @@ test("shapeResult: CLOB is partially read via getData(1, cap+1), truncated with 
   assert.equal(cell.startsWith("c".repeat(CAPS.cell)), true);
   assert.match(cell, /\[truncated, total/);
   assert.deepEqual(closeCalls, ["close"]);
+  // The memory-bomb guard: exactly one read, bounded to cap+1, regardless of the
+  // CLOB's real size. A regression to getData(1, lob.length) or fetchAsString would
+  // request (or materialize) the whole megabyte-plus and this fails.
+  assert.deepEqual(getDataCalls, [{ start: 1, amount: CAPS.cell + 1 }]);
 });
 
 test("shapeResult: a CLOB shorter than the cap is returned whole, no truncation note", async () => {
