@@ -1,0 +1,20 @@
+{
+  "connections": {
+    "good-db": {
+      "connectString": "good-db.corp:1521/GOODPDB",
+      "user": "APP_RO",
+      "passwordEnv": "TEST_ORA_PW_GOOD_DB"
+    },
+    "no-user": {
+      "connectString": "bad-db.corp:1521/BADPDB",
+      "passwordEnv": "TEST_ORA_PW_BAD_DB"
+    },
+    "not-an-object": "oops",
+    "bad-tables": {
+      "connectString": "bad2-db.corp:1521/BADPDB",
+      "user": "APP_RO",
+      "passwordEnv": "TEST_ORA_PW_BAD2_DB",
+      "tables": { "allow": "not-an-array" }
+    }
+  }
+}

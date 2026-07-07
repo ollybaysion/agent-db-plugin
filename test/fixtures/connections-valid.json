@@ -1,0 +1,22 @@
+{
+  "connections": {
+    "erp-prod": {
+      "connectString": "erp-db.corp:1521/ERPPDB",
+      "user": "APP_RO",
+      "passwordEnv": "TEST_ORA_PW_ERP_PROD",
+      "description": "ERP 운영",
+      "tables": {
+        "allow": ["ERP.GL_*"],
+        "deny": ["ERP.HR_SALARY"]
+      },
+      "limits": { "callTimeout": 10, "callTimeoutMax": 30, "poolMax": 2 }
+    },
+    "mes-dev": {
+      "connectString": "mes-dev.corp:1521/MESPDB",
+      "user": "DEV1",
+      "passwordEnv": "TEST_ORA_PW_MES_DEV",
+      "limits": { "defaultMaxRows": 200 }
+    }
+  },
+  "limits": { "defaultMaxRows": 100 }
+}
