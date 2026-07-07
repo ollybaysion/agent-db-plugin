@@ -5,9 +5,11 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "build": "esbuild src/server.mjs --bundle --platform=node --format=esm --outfile=dist/server.mjs --packages=bundle",
+    "build": "esbuild src/server.mjs --bundle --platform=node --format=esm --outfile=dist/server.mjs --packages=bundle --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\"",
     "start": "node src/server.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "test:integration": "node --test test/*.integration.test.mjs",
+    "seed:test-db": "node scripts/seed-test-db.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

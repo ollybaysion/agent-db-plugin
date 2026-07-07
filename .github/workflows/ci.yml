@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # gvenzl/oracle-free ships no baked-in Docker HEALTHCHECK (verified via
+    # `docker inspect` against the local dev container), so the service's own
+    # /opt/oracle/healthcheck.sh is wired in explicitly below — first boot
+    # (DB creation) can take a couple of minutes, hence the generous retries.
+    services:
+      oracle:
+        image: gvenzl/oracle-free:23-slim
+        env:
+          ORACLE_PASSWORD: test
+          APP_USER: testuser
+          APP_USER_PASSWORD: testpw
+        ports:
+          - 1521:1521
+        options: >-
+          --health-cmd="/opt/oracle/healthcheck.sh"
+          --health-interval=10s
+          --health-timeout=10s
+          --health-retries=30
+          --health-start-period=60s
+
+    env:
+      ORACLE_TEST_CONNECT_STRING: localhost:1521/FREEPDB1
+      ORACLE_TEST_USER: testuser
+      ORACLE_TEST_PASSWORD: testpw
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - run: npm ci
+
+      # Fails fast on a broken bundle (design §9-6) before the DB-dependent
+      # suite even starts — npm test's bundle.integration.test.mjs also runs
+      # this same build itself, so this step is a quicker first signal, not a
+      # substitute.
+      - run: npm run build
+
+      # Runs the full suite: unit tests (always) + every *.integration.test.mjs
+      # (now reachable via the service container above) — read-only 4-layer
+      # defense, caps/type serialization, schema introspection, table allow/deny,
+      # audit wiring, and the bundle boot+thin-connect check all in one pass.
+      # This *is* the "로컬 스모크 게이트" (design §9's smoke-gate bullet) —
+      # there's no separate script, since bundle.integration.test.mjs already
+      # covers wiring + bundle + a real query end-to-end.
+      - run: npm test

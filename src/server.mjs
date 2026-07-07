@@ -149,7 +149,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 async function main() {
-  config = await loadConfig();
+  // ORACLE_MCP_CONFIG_PATH lets tests/smoke checks point at an isolated
+  // connections.json instead of the real ~/.oracle-mcp one (design §9-6) —
+  // unset in normal use, so real deployments are unaffected.
+  config = await loadConfig(process.env.ORACLE_MCP_CONFIG_PATH || undefined);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // stdio server stays alive until the client closes the stream.
