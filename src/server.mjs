@@ -16,6 +16,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { validateReadOnlyStatement } from "./readonly.mjs";
+import { loadConfig } from "./config.mjs";
+import { listTables, describeTable } from "./schema.mjs";
 
 const TOOLS = [
   {
@@ -75,33 +77,72 @@ const server = new Server(
   { capabilities: { tools: {} } },
 );
 
+// Loaded once at startup (§4) — before server.connect(), so no tool call can
+// race it. A missing/malformed connections.json is fail-soft (config.mjs);
+// list_connections is how an agent discovers what's actually usable.
+let config = { connections: {}, errors: [] };
+
+function textContent(payload) {
+  return { content: [{ type: "text", text: JSON.stringify(payload) }] };
+}
+
+function errorContent(message) {
+  return { content: [{ type: "text", text: message }], isError: true };
+}
+
+function listConnectionsPayload() {
+  return {
+    connections: Object.entries(config.connections).map(([alias, aliasConfig]) => ({
+      alias,
+      description: aliasConfig.description ?? null,
+      user: aliasConfig.user,
+      passwordStatus: aliasConfig.passwordStatus,
+    })),
+    errors: config.errors,
+    ...(config.hint ? { hint: config.hint } : {}),
+  };
+}
+
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args = {} } = request.params;
 
-  // L2 pre-check on run_query so the skeleton demonstrates the guard even before
-  // the DB path exists. Full path (deny-scan, pools, caps) lands with impl (§5).
-  if (name === "run_query") {
-    const gate = validateReadOnlyStatement(args.sql ?? "");
-    if (!gate.ok) {
-      return { content: [{ type: "text", text: gate.reason }], isError: true };
-    }
+  if (name === "list_connections") {
+    return textContent(listConnectionsPayload());
   }
 
-  // TODO(impl): dispatch to handlers (config/pool/executeReadOnly/format/audit).
-  return {
-    content: [
-      {
-        type: "text",
-        text: `NotImplemented(skeleton): ${name}. 구현 예정 — docs/design.md 참고.`,
-      },
-    ],
-    isError: true,
-  };
+  if (name === "list_tables" || name === "describe_table" || name === "run_query") {
+    const aliasConfig = config.connections[args.db];
+    if (!aliasConfig) {
+      return errorContent(`알 수 없는 alias: ${args.db}. list_connections로 확인하세요.`);
+    }
+
+    if (name === "list_tables") {
+      const result = await listTables(args.db, aliasConfig, {
+        schema: args.schema,
+        nameFilter: args.name_filter,
+      });
+      return result.ok ? textContent(result) : errorContent(result.error);
+    }
+
+    if (name === "describe_table") {
+      const result = await describeTable(args.db, aliasConfig, args.table);
+      return result.ok ? textContent(result) : errorContent(result.error);
+    }
+
+    // run_query: L2 pre-check only so far — full wiring (deny-scan, executeReadOnly)
+    // lands with a later issue (#7 needs the deny-scan module first).
+    const gate = validateReadOnlyStatement(args.sql ?? "");
+    if (!gate.ok) return errorContent(gate.reason);
+    return errorContent(`NotImplemented(skeleton): run_query 전체 배선. 구현 예정 — docs/design.md 참고.`);
+  }
+
+  return errorContent(`NotImplemented(skeleton): ${name}. 구현 예정 — docs/design.md 참고.`);
 });
 
 async function main() {
+  config = await loadConfig();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // stdio server stays alive until the client closes the stream.
