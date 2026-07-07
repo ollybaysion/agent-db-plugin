@@ -1,7 +1,7 @@
 {
   "name": "agent-db-plugin",
   "description": "Read-only Oracle (19c) access for Claude Code via an MCP server. Multi-DB/multi-account by alias; writes blocked at the server layer; output capped to protect context.",
-  "version": "0.2.0",
+  "version": "0.1.0",
   "author": {
     "name": "ollybaysion",
     "email": "ollybaysion@gmail.com"

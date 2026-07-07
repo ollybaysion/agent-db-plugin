@@ -8,7 +8,7 @@
     {
       "name": "agent-db-plugin",
       "description": "Read-only Oracle MCP server plugin.",
-      "version": "0.2.0",
+      "version": "0.1.0",
       "source": "./"
     }
   ]
