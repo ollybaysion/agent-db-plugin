@@ -62,6 +62,35 @@ test("executeReadOnly: L2 rejects before ever calling getConnection", async () =
   assert.match(result.error, /SELECT\/WITH/);
 });
 
+test("executeReadOnly: deny-scan rejects a denied table before ever calling getConnection (design §5 수준2)", async () => {
+  const result = await executeReadOnly({
+    alias: "exec-gate",
+    aliasConfig: { tables: { deny: ["ERP.HR_SALARY"] } },
+    sql: "SELECT * FROM hr_salary",
+    getConnection: async () => {
+      throw new Error("should not be called");
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /HR_SALARY/);
+});
+
+test("executeReadOnly: a query with no denied table reference passes the deny-scan through to execution", async () => {
+  const fakeConnection = {
+    rollback: async () => {},
+    execute: async () => ({ metaData: [], rows: [] }),
+    close: async () => {},
+  };
+  const result = await executeReadOnly({
+    alias: "a",
+    aliasConfig: { tables: { deny: ["ERP.HR_SALARY"] } },
+    sql: "SELECT * FROM gl_accounts",
+    getConnection: async () => fakeConnection,
+    shapeResult: () => ({ columns: [], rows: [], rowCount: 0, truncated: false, elapsedMs: 0 }),
+  });
+  assert.equal(result.ok, true);
+});
+
 test("executeReadOnly: full sequence — checkout-rollback before STRO, execute with maxRows+1, shape, unconditional rollback+close", async () => {
   const calls = [];
   const fakeConnection = {

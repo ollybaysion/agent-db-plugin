@@ -16,6 +16,7 @@ import oracledb from "oracledb";
 import { getConnection as checkoutConnection } from "./pool.mjs";
 import { shapeResult as shapeResultImpl } from "./format.mjs";
 import { HARD_MAX_ROWS } from "./config.mjs";
+import { scanForDeniedTables } from "./tables.mjs";
 
 // Statements whose first keyword we accept. Positive match → DDL/DML/PLSQL/LOCK
 // are all rejected by construction (design §5 "L2 설계 원칙").
@@ -67,16 +68,6 @@ export function validateReadOnlyStatement(sql) {
 const DEFAULT_MAX_ROWS = 100;
 
 /**
- * Table-name deny-scan hook point (design §5 테이블 접근 제한 수준 2). The actual
- * glob/word-boundary matching against `tables.deny` lands with issue #7 — this
- * is a no-op placeholder so the §5 sequence is final now and #7 only has to
- * replace this one call site.
- */
-function scanDeniedTables(_sql, _denyList) {
-  return { ok: true };
-}
-
-/**
  * The single execution path (design §5 시퀀스) — every query goes through here,
  * so L2/deny/read-only/caps can't be bypassed by a different code path.
  *
@@ -98,7 +89,7 @@ export async function executeReadOnly({
   const gate = validateReadOnlyStatement(sql);
   if (!gate.ok) return { ok: false, error: gate.reason };
 
-  const denyGate = scanDeniedTables(sql, aliasConfig?.tables?.deny);
+  const denyGate = scanForDeniedTables(sql, aliasConfig?.tables?.deny);
   if (!denyGate.ok) return { ok: false, error: denyGate.reason };
 
   const effectiveMaxRows = Math.min(

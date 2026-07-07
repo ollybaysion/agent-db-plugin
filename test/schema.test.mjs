@@ -63,6 +63,33 @@ test("listTables: a query failure surfaces as {ok:false, error}", async () => {
   assert.match(result.error, /ORA-01017/);
 });
 
+test("listTables: allow patterns hide tables outside the catalog surface (design §5 수준1)", async () => {
+  const executeReadOnly = async () =>
+    okResult(
+      ["OWNER", "TABLE_NAME", "COMMENTS"],
+      [
+        ["ERP", "GL_ACCOUNTS", null],
+        ["ERP", "HR_SALARY", null],
+        ["ERP", "AP_INVOICES", null],
+      ],
+    );
+  const restrictedConfig = { ...aliasConfig, tables: { allow: ["ERP.GL_*", "ERP.AP_*"] } };
+  const result = await listTables("a", restrictedConfig, { executeReadOnly });
+  assert.equal(result.ok, true);
+  assert.deepEqual(
+    result.tables.map((t) => t.table),
+    ["GL_ACCOUNTS", "AP_INVOICES"],
+  );
+});
+
+test("listTables: no allow list configured -> every table is visible", async () => {
+  const executeReadOnly = async () =>
+    okResult(["OWNER", "TABLE_NAME", "COMMENTS"], [["ERP", "HR_SALARY", null]]);
+  const result = await listTables("a", aliasConfig, { executeReadOnly });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.tables.map((t) => t.table), ["HR_SALARY"]);
+});
+
 test("describeTable: rejects an invalid identifier without ever calling executeReadOnly", async () => {
   const result = await describeTable("a", aliasConfig, "bad;name", {
     executeReadOnly: async () => {
@@ -71,6 +98,17 @@ test("describeTable: rejects an invalid identifier without ever calling executeR
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /잘못된 테이블 식별자/);
+});
+
+test("describeTable: rejects a table outside the allow patterns without ever calling executeReadOnly (design §5 수준1)", async () => {
+  const restrictedConfig = { ...aliasConfig, tables: { allow: ["ERP.GL_*"] } };
+  const result = await describeTable("a", restrictedConfig, "ERP.HR_SALARY", {
+    executeReadOnly: async () => {
+      throw new Error("should not be called");
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /허용되지 않은 테이블/);
 });
 
 test("describeTable: table param without a schema prefix defaults to the connection's own user", async () => {

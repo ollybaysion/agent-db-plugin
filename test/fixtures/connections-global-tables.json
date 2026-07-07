@@ -1,0 +1,25 @@
+{
+  "connections": {
+    "inherits-all": {
+      "connectString": "a.corp:1521/A",
+      "user": "APP_RO",
+      "passwordEnv": "TEST_ORA_PW_A"
+    },
+    "overrides-allow-only": {
+      "connectString": "b.corp:1521/B",
+      "user": "APP_RO",
+      "passwordEnv": "TEST_ORA_PW_B",
+      "tables": { "allow": ["MES.*"] }
+    },
+    "overrides-both": {
+      "connectString": "c.corp:1521/C",
+      "user": "APP_RO",
+      "passwordEnv": "TEST_ORA_PW_C",
+      "tables": { "allow": ["FIN.*"], "deny": ["FIN.SECRET"] }
+    }
+  },
+  "tables": {
+    "allow": ["ERP.GL_*", "ERP.AP_*"],
+    "deny": ["*.PII_*"]
+  }
+}

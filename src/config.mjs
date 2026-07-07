@@ -43,6 +43,31 @@ function mergeLimits(globalLimits, connLimits) {
   return merged;
 }
 
+// design §4/§5: a top-level `tables` (allow/deny) applies to EVERY alias — the
+// DBs are near-identical, so the access lists are declared once and only the few
+// differing aliases override. The merge is per-key, symmetric with mergeLimits:
+// an alias's `allow`/`deny` REPLACES the global one for that key (each array
+// whole, never element-merged), but a key the alias omits is inherited. So an
+// alias that customizes only `allow` still keeps the global `deny` — important
+// because deny is typically a safety guard (e.g. `*.PII_*`) you don't want a
+// per-alias allow tweak to silently drop. Returns undefined when neither side
+// sets tables, preserving tables.mjs's "no list → unrestricted" contract.
+function resolveTables(globalTables, connTables) {
+  if (!globalTables && !connTables) return undefined;
+  return { ...globalTables, ...connTables };
+}
+
+/** Returns an error string, or null if a tables spec (allow/deny arrays) is well-formed. */
+function validateTablesSpec(label, tables) {
+  if (!isPlainObject(tables)) return `${label}: tables는 객체여야 합니다`;
+  for (const key of ["allow", "deny"]) {
+    if (tables[key] !== undefined && !Array.isArray(tables[key])) {
+      return `${label}: tables.${key}는 배열이어야 합니다`;
+    }
+  }
+  return null;
+}
+
 /** Returns an error string, or null if the alias config is well-formed. */
 function validateAlias(alias, raw) {
   if (!isPlainObject(raw)) return `${alias}: 설정이 객체가 아닙니다`;
@@ -56,12 +81,8 @@ function validateAlias(alias, raw) {
     return `${alias}: description은 문자열이어야 합니다`;
   }
   if (raw.tables !== undefined) {
-    if (!isPlainObject(raw.tables)) return `${alias}: tables는 객체여야 합니다`;
-    for (const key of ["allow", "deny"]) {
-      if (raw.tables[key] !== undefined && !Array.isArray(raw.tables[key])) {
-        return `${alias}: tables.${key}는 배열이어야 합니다`;
-      }
-    }
+    const tablesError = validateTablesSpec(alias, raw.tables);
+    if (tablesError) return tablesError;
   }
   if (raw.limits !== undefined && !isPlainObject(raw.limits)) {
     return `${alias}: limits는 객체여야 합니다`;
@@ -98,6 +119,16 @@ export async function loadConfig(path = CONFIG_PATH) {
   const connections = {};
   const errors = [];
 
+  // Top-level tables is fail-soft too: a malformed global spec is collected as an
+  // error and dropped (globalTables stays undefined), rather than failing every
+  // alias that would otherwise inherit it.
+  let globalTables;
+  if (parsed?.tables !== undefined) {
+    const tablesError = validateTablesSpec("최상위 tables", parsed.tables);
+    if (tablesError) errors.push(tablesError);
+    else globalTables = parsed.tables;
+  }
+
   for (const [alias, rawAlias] of Object.entries(rawConnections)) {
     const error = validateAlias(alias, rawAlias);
     if (error) {
@@ -109,7 +140,7 @@ export async function loadConfig(path = CONFIG_PATH) {
       user: rawAlias.user,
       passwordEnv: rawAlias.passwordEnv,
       description: rawAlias.description,
-      tables: rawAlias.tables,
+      tables: resolveTables(globalTables, rawAlias.tables),
       limits: mergeLimits(globalLimits, rawAlias.limits),
       passwordStatus: passwordEnvStatus(rawAlias.passwordEnv),
     };
