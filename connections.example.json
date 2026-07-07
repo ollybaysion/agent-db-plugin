@@ -5,17 +5,16 @@
       "user": "APP_RO",
       "passwordEnv": "ORA_PW_ERP_PROD",
       "description": "ERP 운영. 야간 배치 시간대(01~03시) 조회 자제",
-      "tables": {
-        "allow": ["ERP.GL_*", "ERP.AP_*"],
-        "deny": ["ERP.HR_SALARY", "*.PII_*"]
-      },
       "limits": { "callTimeout": 10, "callTimeoutMax": 30, "poolMax": 2 }
     },
     "mes-dev": {
       "connectString": "mes-dev.corp:1521/MESPDB",
       "user": "DEV1",
       "passwordEnv": "ORA_PW_MES_DEV",
-      "description": "MES 개발",
+      "description": "MES 개발. GL 계열은 이 DB에 없어 allow를 좁힘 (deny는 전역 그대로 상속)",
+      "tables": {
+        "allow": ["MES.*"]
+      },
       "limits": {
         "defaultMaxRows": 200,
         "callTimeout": 30,
@@ -23,5 +22,9 @@
       }
     }
   },
-  "limits": { "defaultMaxRows": 100 }
+  "limits": { "defaultMaxRows": 100 },
+  "tables": {
+    "allow": ["ERP.GL_*", "ERP.AP_*", "MES.*"],
+    "deny": ["ERP.HR_SALARY", "*.PII_*"]
+  }
 }

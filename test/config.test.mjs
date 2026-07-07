@@ -13,6 +13,7 @@ const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const VALID = join(FIXTURES, "connections-valid.json");
 const MISSING_FIELD = join(FIXTURES, "connections-missing-field.json");
 const MISSING_FILE = join(FIXTURES, "does-not-exist.json");
+const GLOBAL_TABLES = join(FIXTURES, "connections-global-tables.json");
 
 test("normal: parses aliases, merges limits, reports password env status", async () => {
   delete process.env.TEST_ORA_PW_ERP_PROD;
@@ -39,6 +40,61 @@ test("normal: parses aliases, merges limits, reports password env status", async
   assert.equal(mes.limits.callTimeout, 30);
 
   delete process.env.TEST_ORA_PW_MES_DEV;
+});
+
+test("global tables: an alias with no tables inherits the top-level allow+deny", async () => {
+  const { connections, errors } = await loadConfig(GLOBAL_TABLES);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(connections["inherits-all"].tables, {
+    allow: ["ERP.GL_*", "ERP.AP_*"],
+    deny: ["*.PII_*"],
+  });
+});
+
+test("global tables: an alias overriding only allow keeps the global deny (per-key merge)", async () => {
+  const { connections } = await loadConfig(GLOBAL_TABLES);
+  assert.deepEqual(connections["overrides-allow-only"].tables, {
+    allow: ["MES.*"], // replaced whole
+    deny: ["*.PII_*"], // inherited from global — a per-alias allow tweak must not drop the deny guard
+  });
+});
+
+test("global tables: an alias overriding both keys ignores the global lists entirely", async () => {
+  const { connections } = await loadConfig(GLOBAL_TABLES);
+  assert.deepEqual(connections["overrides-both"].tables, {
+    allow: ["FIN.*"],
+    deny: ["FIN.SECRET"],
+  });
+});
+
+test("global tables: a per-alias tables object still wins over global (existing valid fixture)", async () => {
+  // connections-valid.json has NO top-level tables and erp-prod defines its own —
+  // resolveTables(undefined, connTables) must return the alias's own spec unchanged.
+  const { connections } = await loadConfig(VALID);
+  assert.deepEqual(connections["erp-prod"].tables, { allow: ["ERP.GL_*"], deny: ["ERP.HR_SALARY"] });
+  // mes-dev sets no tables and there's no global → undefined (unrestricted).
+  assert.equal(connections["mes-dev"].tables, undefined);
+});
+
+test("global tables: a malformed top-level tables is a collected error, aliases still load", async () => {
+  const raw = JSON.stringify({
+    connections: {
+      "ok-db": { connectString: "x:1521/X", user: "U", passwordEnv: "TEST_ORA_PW_OK" },
+    },
+    tables: { allow: "not-an-array" },
+  });
+  const tmp = join(FIXTURES, "connections-bad-global-tables.json");
+  const { writeFile, unlink } = await import("node:fs/promises");
+  await writeFile(tmp, raw);
+  try {
+    const { connections, errors } = await loadConfig(tmp);
+    assert.deepEqual(Object.keys(connections), ["ok-db"]);
+    assert.equal(connections["ok-db"].tables, undefined); // malformed global dropped, not inherited
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0].startsWith("최상위 tables:"));
+  } finally {
+    await unlink(tmp);
+  }
 });
 
 test("missing field: bad aliases are dropped (fail-soft), good ones still load", async () => {
