@@ -11,6 +11,12 @@
 //   L3  autocommit off + no commit code path + unconditional rollback.
 //   L4  node-oracledb runs exactly one statement per execute() (verified §11-4).
 
+import oracledb from "oracledb";
+
+import { getConnection as checkoutConnection } from "./pool.mjs";
+import { shapeResult as shapeResultImpl } from "./format.mjs";
+import { HARD_MAX_ROWS } from "./config.mjs";
+
 // Statements whose first keyword we accept. Positive match → DDL/DML/PLSQL/LOCK
 // are all rejected by construction (design §5 "L2 설계 원칙").
 const ALLOWED_FIRST_KEYWORDS = new Set(["SELECT", "WITH"]);
@@ -58,13 +64,76 @@ export function validateReadOnlyStatement(sql) {
   return { ok: true };
 }
 
+const DEFAULT_MAX_ROWS = 100;
+
 /**
- * The single execution path. TODO(impl): wire the §5 sequence —
- *   validateReadOnlyStatement → deny-scan → getConnection → rollback →
- *   callTimeout → SET TRANSACTION READ ONLY → execute(maxRows+1) →
- *   cap/serialize (format.mjs) → rollback → close. Audit on the way out.
- * Kept as a stub in the skeleton; implementation later.
+ * Table-name deny-scan hook point (design §5 테이블 접근 제한 수준 2). The actual
+ * glob/word-boundary matching against `tables.deny` lands with issue #7 — this
+ * is a no-op placeholder so the §5 sequence is final now and #7 only has to
+ * replace this one call site.
  */
-export async function executeReadOnly(/* { pool, sql, binds, limits } */) {
-  throw new Error("NotImplemented: executeReadOnly (skeleton) — see docs/design.md §5");
+function scanDeniedTables(_sql, _denyList) {
+  return { ok: true };
+}
+
+/**
+ * The single execution path (design §5 시퀀스) — every query goes through here,
+ * so L2/deny/read-only/caps can't be bypassed by a different code path.
+ *
+ * `getConnection`/`shapeResult` are injectable (default to the real pool.mjs /
+ * format.mjs implementations) so this can be unit-tested against a fake
+ * connection: ESM named exports can't be monkey-patched the way the oracledb
+ * CJS object can be (see pool.test.mjs), so a plain default-parameter seam
+ * stands in for that.
+ */
+export async function executeReadOnly({
+  alias,
+  aliasConfig,
+  sql,
+  binds = {},
+  maxRows,
+  getConnection = checkoutConnection,
+  shapeResult = shapeResultImpl,
+} = {}) {
+  const gate = validateReadOnlyStatement(sql);
+  if (!gate.ok) return { ok: false, error: gate.reason };
+
+  const denyGate = scanDeniedTables(sql, aliasConfig?.tables?.deny);
+  if (!denyGate.ok) return { ok: false, error: denyGate.reason };
+
+  const effectiveMaxRows = Math.min(
+    maxRows ?? aliasConfig?.limits?.defaultMaxRows ?? DEFAULT_MAX_ROWS,
+    HARD_MAX_ROWS,
+  );
+
+  let connection;
+  try {
+    connection = await getConnection(alias, aliasConfig);
+    await connection.rollback(); // §12-3: checkout-time cleanup of a dirty pooled connection
+    await connection.execute("SET TRANSACTION READ ONLY");
+
+    const startedAt = Date.now();
+    const result = await connection.execute(sql, binds, {
+      maxRows: effectiveMaxRows + 1, // +1 for truncation detection (§6)
+      outFormat: oracledb.OUT_FORMAT_ARRAY,
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    return {
+      ok: true,
+      ...shapeResult({
+        metaData: result.metaData,
+        rows: result.rows,
+        maxRows: effectiveMaxRows,
+        elapsedMs,
+      }),
+    };
+  } catch (err) {
+    return { ok: false, error: err.message }; // ORA code+message verbatim (§8)
+  } finally {
+    if (connection) {
+      await connection.rollback().catch(() => {}); // unconditional — read-only txn/lock cleanup
+      await connection.close().catch(() => {});
+    }
+  }
 }
