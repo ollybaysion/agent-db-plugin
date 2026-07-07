@@ -1,0 +1,19 @@
+{
+  "name": "agent-db-plugin",
+  "version": "0.1.0",
+  "description": "Read-only Oracle MCP server for Claude Code.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/server.mjs --bundle --platform=node --format=esm --outfile=dist/server.mjs --packages=bundle",
+    "start": "node src/server.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "oracledb": "^7.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}
