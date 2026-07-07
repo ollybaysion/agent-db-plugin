@@ -71,7 +71,7 @@ const TOOLS = [
 ];
 
 const server = new Server(
-  { name: "agent-db-plugin", version: "0.1.0" },
+  { name: "agent-db-plugin", version: "0.2.0" },
   { capabilities: { tools: {} } },
 );
 

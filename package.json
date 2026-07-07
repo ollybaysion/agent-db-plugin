@@ -1,6 +1,6 @@
 {
   "name": "agent-db-plugin",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Read-only Oracle MCP server for Claude Code.",
   "type": "module",
   "private": true,
