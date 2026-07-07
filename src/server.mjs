@@ -132,14 +132,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return result.ok ? textContent(result) : errorContent(result.error);
     }
 
-    // run_query: L2/deny/read-only/caps all happen inside executeReadOnly's
-    // single path (§5) — audit logging joins this call site with #8.
+    // run_query: L2/deny/read-only/caps/audit all happen inside
+    // executeReadOnly's single path (§5, §8).
     const result = await executeReadOnly({
       alias: args.db,
       aliasConfig,
       sql: args.sql ?? "",
       binds: args.binds ?? {},
       maxRows: args.max_rows,
+      tool: "run_query",
     });
     return result.ok ? textContent(result) : errorContent(result.error);
   }

@@ -33,8 +33,8 @@ function rowsToObjects(result) {
   return result.rows.map((row) => Object.fromEntries(row.map((v, i) => [names[i], v])));
 }
 
-async function runCatalogQuery(executeReadOnly, alias, aliasConfig, sql, binds) {
-  const result = await executeReadOnly({ alias, aliasConfig, sql, binds, maxRows: HARD_MAX_ROWS });
+async function runCatalogQuery(executeReadOnly, alias, aliasConfig, sql, binds, tool) {
+  const result = await executeReadOnly({ alias, aliasConfig, sql, binds, maxRows: HARD_MAX_ROWS, tool });
   if (!result.ok) throw new Error(result.error);
   return rowsToObjects(result);
 }
@@ -72,6 +72,7 @@ export async function listTables(
         WHERE 1=1 ${where}
         ORDER BY t.owner, t.table_name`,
       binds,
+      "list_tables",
     );
     const tables = filterAllowedTables(rows, aliasConfig?.tables?.allow).map((r) => ({
       owner: r.OWNER,
@@ -123,6 +124,7 @@ export async function describeTable(alias, aliasConfig, tableParam, { executeRea
     aliasConfig,
     sql: `SELECT * FROM "${owner}"."${table}" WHERE 1=0`,
     maxRows: 1,
+    tool: "describe_table",
   });
   if (!exists.ok) return { ok: false, error: exists.error }; // ORA text verbatim (§8)
 
@@ -134,6 +136,7 @@ export async function describeTable(alias, aliasConfig, tableParam, { executeRea
         aliasConfig,
         `SELECT num_rows, last_analyzed FROM all_tables WHERE owner = :owner AND table_name = :tableName`,
         { owner, tableName: table },
+        "describe_table",
       ),
       runCatalogQuery(
         executeReadOnly,
@@ -147,6 +150,7 @@ export async function describeTable(alias, aliasConfig, tableParam, { executeRea
           WHERE col.owner = :owner AND col.table_name = :tableName
           ORDER BY col.column_id`,
         { owner, tableName: table },
+        "describe_table",
       ),
       runCatalogQuery(
         executeReadOnly,
@@ -158,6 +162,7 @@ export async function describeTable(alias, aliasConfig, tableParam, { executeRea
           WHERE cc.owner = :owner AND c.table_name = :tableName AND c.constraint_type = 'P'
           ORDER BY cc.position`,
         { owner, tableName: table },
+        "describe_table",
       ),
       runCatalogQuery(
         executeReadOnly,
@@ -172,6 +177,7 @@ export async function describeTable(alias, aliasConfig, tableParam, { executeRea
           WHERE fk.owner = :owner AND fk.table_name = :tableName AND fk.constraint_type = 'R'
           ORDER BY fk.constraint_name, fkc.position`,
         { owner, tableName: table },
+        "describe_table",
       ),
       runCatalogQuery(
         executeReadOnly,
@@ -179,6 +185,7 @@ export async function describeTable(alias, aliasConfig, tableParam, { executeRea
         aliasConfig,
         `SELECT index_name, uniqueness FROM all_indexes WHERE owner = :owner AND table_name = :tableName`,
         { owner, tableName: table },
+        "describe_table",
       ),
       runCatalogQuery(
         executeReadOnly,
@@ -188,6 +195,7 @@ export async function describeTable(alias, aliasConfig, tableParam, { executeRea
            FROM all_ind_columns WHERE index_owner = :owner AND table_name = :tableName
           ORDER BY index_name, column_position`,
         { owner, tableName: table },
+        "describe_table",
       ),
     ]);
 
