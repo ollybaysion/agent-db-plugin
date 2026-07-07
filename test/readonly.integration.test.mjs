@@ -97,6 +97,7 @@ test("executeReadOnly: SELECT ... FOR UPDATE is rejected with ORA-01456 (§11-1)
     alias: ALIAS,
     aliasConfig,
     sql: "SELECT * FROM t_readonly_it FOR UPDATE",
+    audit: async () => {},
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /ORA-01456/);
@@ -107,6 +108,7 @@ test("executeReadOnly: DDL is rejected by L2 before ever reaching the DB (design
     alias: ALIAS,
     aliasConfig,
     sql: "CREATE TABLE t_readonly_it_escape (x NUMBER)",
+    audit: async () => {},
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /SELECT\/WITH/);
@@ -117,6 +119,7 @@ test("executeReadOnly: a semicolon-chained statement is rejected by the driver, 
     alias: ALIAS,
     aliasConfig,
     sql: "SELECT 1 FROM dual; SELECT 2 FROM dual",
+    audit: async () => {},
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /ORA-03405/);
@@ -128,6 +131,7 @@ test("executeReadOnly: a valid SELECT succeeds end-to-end (via format.mjs, #5) a
       alias: ALIAS,
       aliasConfig,
       sql: "SELECT note FROM t_readonly_it WHERE id = 1",
+      audit: async () => {},
     }),
   );
   assert.equal(result.ok, true);
@@ -153,6 +157,7 @@ test("executeReadOnly: checkout-time rollback cleans up a dirty pooled connectio
       alias: ALIAS,
       aliasConfig,
       sql: "SELECT note FROM t_readonly_it WHERE id = 1",
+      audit: async () => {},
     }),
   );
   assert.equal(result.ok, true); // not ORA-01453 — checkout-rollback cleared the dangling txn
@@ -165,6 +170,7 @@ test("executeReadOnly: tables.deny blocks a query naming the denied table direct
     alias: ALIAS,
     aliasConfig: { ...aliasConfig, tables: { deny: ["*.T_READONLY_IT"] } },
     sql: "SELECT note FROM t_readonly_it WHERE id = 1",
+    audit: async () => {},
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /T_READONLY_IT/);
@@ -176,6 +182,7 @@ test("executeReadOnly: a synonym wrapping the denied table bypasses the name-sca
       alias: ALIAS,
       aliasConfig: { ...aliasConfig, tables: { deny: ["*.T_READONLY_IT"] } },
       sql: "SELECT note FROM t_readonly_it_syn WHERE id = 1",
+      audit: async () => {},
     }),
   );
   assert.equal(result.ok, true); // synonym name doesn't match the deny pattern — reaches the real table

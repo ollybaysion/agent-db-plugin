@@ -57,6 +57,7 @@ test("executeReadOnly: L2 rejects before ever calling getConnection", async () =
     getConnection: async () => {
       throw new Error("should not be called");
     },
+    audit: async () => {},
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /SELECT\/WITH/);
@@ -70,6 +71,7 @@ test("executeReadOnly: deny-scan rejects a denied table before ever calling getC
     getConnection: async () => {
       throw new Error("should not be called");
     },
+    audit: async () => {},
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /HR_SALARY/);
@@ -87,6 +89,7 @@ test("executeReadOnly: a query with no denied table reference passes the deny-sc
     sql: "SELECT * FROM gl_accounts",
     getConnection: async () => fakeConnection,
     shapeResult: () => ({ columns: [], rows: [], rowCount: 0, truncated: false, elapsedMs: 0 }),
+    audit: async () => {},
   });
   assert.equal(result.ok, true);
 });
@@ -124,6 +127,7 @@ test("executeReadOnly: full sequence — checkout-rollback before STRO, execute 
       assert.equal(typeof args.elapsedMs, "number");
       return shaped;
     },
+    audit: async () => {},
   });
 
   assert.deepEqual(result, { ok: true, ...shaped });
@@ -156,6 +160,7 @@ test("executeReadOnly: maxRows override is clamped to the hard cap", async () =>
     maxRows: HARD_MAX_ROWS * 10,
     getConnection: async () => fakeConnection,
     shapeResult: () => ({ columns: [], rows: [], rowCount: 0, truncated: false, elapsedMs: 0 }),
+    audit: async () => {},
   });
 
   assert.equal(capturedMaxRows, HARD_MAX_ROWS + 1);
@@ -184,6 +189,7 @@ test("executeReadOnly: a DB-level rejection (e.g. FOR UPDATE → ORA-01456) is r
     aliasConfig: {},
     sql: "SELECT * FROM t FOR UPDATE",
     getConnection: async () => fakeConnection,
+    audit: async () => {},
   });
 
   assert.equal(result.ok, false);
@@ -199,7 +205,82 @@ test("executeReadOnly: a connection-checkout failure (e.g. pool exhausted) is re
     getConnection: async () => {
       throw new Error("NJS-040: connection request timeout");
     },
+    audit: async () => {},
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /NJS-040/);
+});
+
+// audit wiring (design §8, issue #8) — executeReadOnly calls `audit` exactly
+// once per invocation, regardless of which exit path was taken. `audit`
+// defaults to the real audit.mjs implementation, so every test above that
+// doesn't care about auditing overrides it with a no-op to avoid writing to
+// the developer's real ~/.oracle-mcp/audit. audit.mjs's own behavior (line
+// format, perms, fail-open) is covered directly in audit.test.mjs.
+
+test("executeReadOnly: audits an L2 rejection — no DB round trip, but still one record with oraError set", async () => {
+  const calls = [];
+  await executeReadOnly({
+    alias: "erp-prod",
+    aliasConfig: {},
+    sql: "DROP TABLE t",
+    tool: "run_query",
+    getConnection: async () => {
+      throw new Error("should not be called");
+    },
+    audit: async (record) => calls.push(record),
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].alias, "erp-prod");
+  assert.equal(calls[0].tool, "run_query");
+  assert.equal(calls[0].sql, "DROP TABLE t");
+  assert.equal(typeof calls[0].elapsedMs, "number");
+  assert.equal(calls[0].rowCount, null);
+  assert.equal(calls[0].truncated, null);
+  assert.match(calls[0].oraError, /SELECT\/WITH/);
+});
+
+test("executeReadOnly: audits a successful query with rowCount/truncated from the shaped result and no oraError", async () => {
+  const calls = [];
+  const fakeConnection = {
+    rollback: async () => {},
+    execute: async () => ({ metaData: [], rows: [] }),
+    close: async () => {},
+  };
+  await executeReadOnly({
+    alias: "a",
+    aliasConfig: {},
+    sql: "SELECT 1 FROM dual",
+    tool: "list_tables",
+    getConnection: async () => fakeConnection,
+    shapeResult: () => ({ columns: [], rows: [], rowCount: 3, truncated: true, elapsedMs: 5 }),
+    audit: async (record) => calls.push(record),
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].tool, "list_tables");
+  assert.equal(calls[0].rowCount, 3);
+  assert.equal(calls[0].truncated, true);
+  assert.equal(calls[0].oraError, null);
+});
+
+test("executeReadOnly: audits a DB-level failure with the ORA message as oraError", async () => {
+  const calls = [];
+  const fakeConnection = {
+    rollback: async () => {},
+    execute: async (sql) => {
+      if (/SET TRANSACTION/.test(sql)) return;
+      throw new Error("ORA-01456: may not perform insert/delete/update operation inside a READ ONLY transaction");
+    },
+    close: async () => {},
+  };
+  await executeReadOnly({
+    alias: "a",
+    aliasConfig: {},
+    sql: "SELECT * FROM t FOR UPDATE",
+    getConnection: async () => fakeConnection,
+    audit: async (record) => calls.push(record),
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].rowCount, null);
+  assert.match(calls[0].oraError, /ORA-01456/);
 });
