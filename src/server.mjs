@@ -1,6 +1,6 @@
 // agent-db-plugin — read-only Oracle MCP server (stdio).
-// Design: docs/design.md. This file wires the MCP plumbing and tool schemas;
-// the DB-touching handlers are stubs in the skeleton (implementation later).
+// Design: docs/design.md. This file wires the MCP plumbing and tool schemas
+// to the handlers in schema.mjs/readonly.mjs.
 //
 // Tools (design §7):
 //   list_connections  — aliases + status (never returns passwords)
@@ -15,7 +15,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { validateReadOnlyStatement } from "./readonly.mjs";
+import { executeReadOnly } from "./readonly.mjs";
 import { loadConfig } from "./config.mjs";
 import { listTables, describeTable } from "./schema.mjs";
 
@@ -57,7 +57,8 @@ const TOOLS = [
   {
     name: "run_query",
     description:
-      "SELECT/WITH 조회 전용. 쓰기·DDL·PL/SQL 차단. 숫자는 문자열로, 대용량은 캡되어 반환(truncated 표시). 바인드(:name) 권장.",
+      "SELECT/WITH 조회 전용. 쓰기·DDL·PL/SQL 차단. 숫자는 문자열로, 대용량은 캡되어 반환(truncated 표시). 바인드(:name) 권장. " +
+        "관리자가 지정한 deny 테이블명이 SQL에 등장하면 거부됨.",
     inputSchema: {
       type: "object",
       properties: {
@@ -131,11 +132,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return result.ok ? textContent(result) : errorContent(result.error);
     }
 
-    // run_query: L2 pre-check only so far — full wiring (deny-scan, executeReadOnly)
-    // lands with a later issue (#7 needs the deny-scan module first).
-    const gate = validateReadOnlyStatement(args.sql ?? "");
-    if (!gate.ok) return errorContent(gate.reason);
-    return errorContent(`NotImplemented(skeleton): run_query 전체 배선. 구현 예정 — docs/design.md 참고.`);
+    // run_query: L2/deny/read-only/caps all happen inside executeReadOnly's
+    // single path (§5) — audit logging joins this call site with #8.
+    const result = await executeReadOnly({
+      alias: args.db,
+      aliasConfig,
+      sql: args.sql ?? "",
+      binds: args.binds ?? {},
+      maxRows: args.max_rows,
+    });
+    return result.ok ? textContent(result) : errorContent(result.error);
   }
 
   return errorContent(`NotImplemented(skeleton): ${name}. 구현 예정 — docs/design.md 참고.`);

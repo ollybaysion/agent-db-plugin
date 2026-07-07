@@ -73,6 +73,10 @@ before(async () => {
     await setup.execute(`CREATE TABLE t_readonly_it (id NUMBER PRIMARY KEY, note VARCHAR2(100))`);
     await setup.execute(`INSERT INTO t_readonly_it VALUES (1, 'alpha')`);
     await setup.execute(`COMMIT`);
+    await setup.execute(
+      `BEGIN EXECUTE IMMEDIATE 'DROP SYNONYM t_readonly_it_syn'; EXCEPTION WHEN OTHERS THEN NULL; END;`,
+    );
+    await setup.execute(`CREATE SYNONYM t_readonly_it_syn FOR t_readonly_it`);
   } finally {
     await setup.close();
   }
@@ -153,5 +157,27 @@ test("executeReadOnly: checkout-time rollback cleans up a dirty pooled connectio
   );
   assert.equal(result.ok, true); // not ORA-01453 — checkout-rollback cleared the dangling txn
   // the dirty UPDATE was never committed, so the checkout-rollback discarded it
+  assert.deepEqual(result.rows, [["alpha"]]);
+});
+
+test("executeReadOnly: tables.deny blocks a query naming the denied table directly (design §5 수준2, issue #7)", { skip }, async () => {
+  const result = await executeReadOnly({
+    alias: ALIAS,
+    aliasConfig: { ...aliasConfig, tables: { deny: ["*.T_READONLY_IT"] } },
+    sql: "SELECT note FROM t_readonly_it WHERE id = 1",
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /T_READONLY_IT/);
+});
+
+test("executeReadOnly: a synonym wrapping the denied table bypasses the name-scan — documented gap, not a bug (§12-4)", { skip }, async () => {
+  const result = await execRetrying01466(() =>
+    executeReadOnly({
+      alias: ALIAS,
+      aliasConfig: { ...aliasConfig, tables: { deny: ["*.T_READONLY_IT"] } },
+      sql: "SELECT note FROM t_readonly_it_syn WHERE id = 1",
+    }),
+  );
+  assert.equal(result.ok, true); // synonym name doesn't match the deny pattern — reaches the real table
   assert.deepEqual(result.rows, [["alpha"]]);
 });

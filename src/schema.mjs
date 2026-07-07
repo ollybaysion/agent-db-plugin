@@ -20,6 +20,7 @@
 
 import { executeReadOnly as executeReadOnlyImpl } from "./readonly.mjs";
 import { HARD_MAX_ROWS } from "./config.mjs";
+import { isTableAllowed, filterAllowedTables } from "./tables.mjs";
 
 const IDENTIFIER_RE = /^[A-Za-z0-9_$#]+$/;
 
@@ -36,16 +37,6 @@ async function runCatalogQuery(executeReadOnly, alias, aliasConfig, sql, binds) 
   const result = await executeReadOnly({ alias, aliasConfig, sql, binds, maxRows: HARD_MAX_ROWS });
   if (!result.ok) throw new Error(result.error);
   return rowsToObjects(result);
-}
-
-/** design §5 수준1 hook point (list_tables side) — real glob-matching lands with #7. */
-function filterAllowedTables(rows, _allowPatterns) {
-  return rows;
-}
-
-/** design §5 수준1 hook point (describe_table side) — real glob-matching lands with #7. */
-function isTableAllowed(_owner, _table, _allowPatterns) {
-  return true;
 }
 
 /**

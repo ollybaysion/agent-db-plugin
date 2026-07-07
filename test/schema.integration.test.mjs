@@ -154,3 +154,22 @@ test("describeTable: schema-qualified table param works the same as unqualified"
   assert.equal(result.ok, true);
   assert.equal(result.table, "SC_ORDER");
 });
+
+test("listTables: allow patterns hide tables outside the catalog surface, end-to-end against real ALL_TABLES (design §5 수준1, issue #7)", { skip }, async () => {
+  const restrictedConfig = { ...aliasConfig, tables: { allow: [`${TEST_USER.toUpperCase()}.SC_ORDER`] } };
+  const result = await retrying01466(() =>
+    listTables(ALIAS, restrictedConfig, { schema: TEST_USER, nameFilter: "SC_%" }),
+  );
+  assert.equal(result.ok, true);
+  assert.deepEqual(
+    result.tables.map((t) => t.table),
+    ["SC_ORDER"],
+  );
+});
+
+test("describeTable: a table outside the allow patterns is rejected without ever reaching the DB (design §5 수준1, issue #7)", { skip }, async () => {
+  const restrictedConfig = { ...aliasConfig, tables: { allow: [`${TEST_USER.toUpperCase()}.SC_ORDER`] } };
+  const result = await describeTable(ALIAS, restrictedConfig, "sc_item");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /허용되지 않은 테이블/);
+});
