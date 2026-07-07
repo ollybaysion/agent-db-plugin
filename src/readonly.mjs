@@ -121,12 +121,12 @@ export async function executeReadOnly({
 
     return {
       ok: true,
-      ...shapeResult({
+      ...(await shapeResult({
         metaData: result.metaData,
         rows: result.rows,
         maxRows: effectiveMaxRows,
         elapsedMs,
-      }),
+      })),
     };
   } catch (err) {
     return { ok: false, error: err.message }; // ORA code+message verbatim (§8)
