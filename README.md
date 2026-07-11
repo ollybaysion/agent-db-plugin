@@ -34,6 +34,34 @@ from a SELECT) is documented, not hidden — a read-only DB account is the real 
 | `describe_table` | columns, PK/FK, indexes, row-count estimate (`tables.allow`-gated) |
 | `run_query` | `SELECT`/`WITH` only, capped output, `tables.deny`-scanned |
 
+## Install as a Claude Code plugin
+
+```text
+/plugin marketplace add ollybaysion/agent-db-plugin
+```
+
+The marketplace clone does **not** contain the server the plugin runs:
+`dist/server.mjs` is a build artifact (gitignored), but `.mcp.json` points at
+`${CLAUDE_PLUGIN_ROOT}/dist/server.mjs`. Build it inside the clone **before**
+installing — `/plugin install` copies the clone's working tree (untracked
+files included) into the plugin cache, so the order matters:
+
+```bash
+npm --prefix ~/.claude/plugins/marketplaces/agent-db-plugin install
+npm --prefix ~/.claude/plugins/marketplaces/agent-db-plugin run build
+```
+
+Then `/plugin install agent-db-plugin@agent-db-plugin` and restart Claude Code.
+Two things to re-check after that:
+
+- the password env vars named by `passwordEnv` (see Configuration below) must
+  already be exported when Claude Code starts — the MCP server inherits its
+  environment from the Claude Code process at launch.
+- `dist/` and `node_modules/` are untracked in the clone, so a marketplace
+  update or re-clone silently drops them — re-run the two commands above (and
+  reinstall) afterwards. Making this automatic (committing `dist/` or shipping
+  it as a release artifact) is tracked in #24.
+
 ## Configuration
 
 Global file `~/.oracle-mcp/connections.json` (per-user, never committed). It holds
