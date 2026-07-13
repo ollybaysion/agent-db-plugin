@@ -18,6 +18,7 @@ import { shapeResult as shapeResultImpl } from "./format.mjs";
 import { HARD_MAX_ROWS } from "./config.mjs";
 import { scanForDeniedTables } from "./tables.mjs";
 import { auditLog as auditLogImpl } from "./audit.mjs";
+import { emitDbQuery as emitDbQueryImpl } from "./obs.mjs";
 
 // Statements whose first keyword we accept. Positive match → DDL/DML/PLSQL/LOCK
 // are all rejected by construction (design §5 "L2 설계 원칙").
@@ -81,12 +82,20 @@ const DEFAULT_MAX_ROWS = 100;
  * implementation would write to the developer's actual ~/.oracle-mcp/audit.
  *
  * `tool` (e.g. "run_query"/"list_tables"/"describe_table") is caller-supplied
- * context for the audit record only — it plays no role in read-only
- * enforcement. schema.mjs's internal catalog queries flow through here too
- * (§3.1 "단일 함수 하나를 통과"), so a single describe_table call produces
- * several audit lines, one per underlying SQL execution — intentional (§8's
- * "한 줄에 한 실행"), and more useful for pinpointing which exact query was
- * slow (§7 explain_plan 재추가 트리거) than one line per tool call would be.
+ * context for the audit/observability record only — it plays no role in
+ * read-only enforcement. schema.mjs's internal catalog queries flow through
+ * here too (§3.1 "단일 함수 하나를 통과"), so a single describe_table call
+ * produces several audit lines, one per underlying SQL execution — intentional
+ * (§8's "한 줄에 한 실행"), and more useful for pinpointing which exact query
+ * was slow (§7 explain_plan 재추가 트리거) than one line per tool call would be.
+ *
+ * `emit` (default: the real obs.mjs DbQuery emitter) mirrors the audit record
+ * to the observability collector (#87). It is FIRE-AND-FORGET: never awaited
+ * (a network round trip must not delay the query response) and its call site
+ * swallows any sync throw or async rejection, so a slow/absent/broken collector
+ * can never delay, fail, or change a query. Tests override it with a no-op —
+ * same rationale as `audit` (otherwise it POSTs to the developer's real running
+ * collector).
  */
 export async function executeReadOnly({
   alias,
@@ -98,10 +107,11 @@ export async function executeReadOnly({
   getConnection = checkoutConnection,
   shapeResult = shapeResultImpl,
   audit = auditLogImpl,
+  emit = emitDbQueryImpl,
 } = {}) {
   const auditStartedAt = Date.now();
   const outcome = await runOnce();
-  await audit({
+  const record = {
     alias,
     tool,
     sql,
@@ -109,7 +119,16 @@ export async function executeReadOnly({
     rowCount: outcome.ok ? outcome.rowCount : null,
     truncated: outcome.ok ? outcome.truncated : null,
     oraError: outcome.ok ? null : outcome.error,
-  });
+  };
+  await audit(record); // local append, fast — safe to await
+  // Fire-and-forget: NOT awaited (latency isolation) and fully insulated — a
+  // sync throw is caught here, an async rejection by .catch — so observability
+  // can never delay or break the query path (#87, fail-open extended to latency).
+  try {
+    Promise.resolve(emit(record)).catch(() => {});
+  } catch {
+    /* an emit bug must never affect a query */
+  }
   return outcome;
 
   async function runOnce() {

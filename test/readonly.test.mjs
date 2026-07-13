@@ -58,6 +58,7 @@ test("executeReadOnly: L2 rejects before ever calling getConnection", async () =
       throw new Error("should not be called");
     },
     audit: async () => {},
+    emit: () => {},
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /SELECT\/WITH/);
@@ -72,6 +73,7 @@ test("executeReadOnly: deny-scan rejects a denied table before ever calling getC
       throw new Error("should not be called");
     },
     audit: async () => {},
+    emit: () => {},
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /HR_SALARY/);
@@ -90,6 +92,7 @@ test("executeReadOnly: a query with no denied table reference passes the deny-sc
     getConnection: async () => fakeConnection,
     shapeResult: () => ({ columns: [], rows: [], rowCount: 0, truncated: false, elapsedMs: 0 }),
     audit: async () => {},
+    emit: () => {},
   });
   assert.equal(result.ok, true);
 });
@@ -128,6 +131,7 @@ test("executeReadOnly: full sequence — checkout-rollback before STRO, execute 
       return shaped;
     },
     audit: async () => {},
+    emit: () => {},
   });
 
   assert.deepEqual(result, { ok: true, ...shaped });
@@ -161,6 +165,7 @@ test("executeReadOnly: maxRows override is clamped to the hard cap", async () =>
     getConnection: async () => fakeConnection,
     shapeResult: () => ({ columns: [], rows: [], rowCount: 0, truncated: false, elapsedMs: 0 }),
     audit: async () => {},
+    emit: () => {},
   });
 
   assert.equal(capturedMaxRows, HARD_MAX_ROWS + 1);
@@ -190,6 +195,7 @@ test("executeReadOnly: a DB-level rejection (e.g. FOR UPDATE → ORA-01456) is r
     sql: "SELECT * FROM t FOR UPDATE",
     getConnection: async () => fakeConnection,
     audit: async () => {},
+    emit: () => {},
   });
 
   assert.equal(result.ok, false);
@@ -206,6 +212,7 @@ test("executeReadOnly: a connection-checkout failure (e.g. pool exhausted) is re
       throw new Error("NJS-040: connection request timeout");
     },
     audit: async () => {},
+    emit: () => {},
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /NJS-040/);
@@ -229,6 +236,7 @@ test("executeReadOnly: audits an L2 rejection — no DB round trip, but still on
       throw new Error("should not be called");
     },
     audit: async (record) => calls.push(record),
+    emit: () => {},
   });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].alias, "erp-prod");
@@ -255,6 +263,7 @@ test("executeReadOnly: audits a successful query with rowCount/truncated from th
     getConnection: async () => fakeConnection,
     shapeResult: () => ({ columns: [], rows: [], rowCount: 3, truncated: true, elapsedMs: 5 }),
     audit: async (record) => calls.push(record),
+    emit: () => {},
   });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].tool, "list_tables");
@@ -279,6 +288,7 @@ test("executeReadOnly: audits a DB-level failure with the ORA message as oraErro
     sql: "SELECT * FROM t FOR UPDATE",
     getConnection: async () => fakeConnection,
     audit: async (record) => calls.push(record),
+    emit: () => {},
   });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].rowCount, null);
